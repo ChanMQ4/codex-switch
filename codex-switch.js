@@ -97,7 +97,7 @@ function scanSessionProviders() {
     const lines = result.split('\n').filter(line => line.trim());
     for (const line of lines) {
       try {
-        const match = line.match(/"model_provider":"([^"]+)"/);
+        const match = line.match(/"model_provider"\s*:\s*"([^"]+)"/);
         if (match) {
           const provider = match[1];
           providerCounts[provider] = (providerCounts[provider] || 0) + 1;
@@ -121,12 +121,25 @@ function findSessionsByProvider(provider) {
 
   try {
     const result = execSync(
-      `grep -r "\\"model_provider\\":\\"${provider}\\"" "${SESSIONS_DIR}" --include="*.jsonl" -l`,
+      `grep -r "\\"model_provider\\"" "${SESSIONS_DIR}" --include="*.jsonl" -l`,
       { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
     );
 
     const lines = result.split('\n').filter(line => line.trim());
-    files.push(...lines);
+
+    // Filter files by provider
+    for (const filePath of lines) {
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const firstLine = content.split('\n')[0];
+        const match = firstLine.match(/"model_provider"\s*:\s*"([^"]+)"/);
+        if (match && match[1] === provider) {
+          files.push(filePath);
+        }
+      } catch (e) {
+        // Ignore read errors
+      }
+    }
   } catch (error) {
     // grep returns non-zero exit code when no matches found
     if (!error.message.includes('Command failed')) {
