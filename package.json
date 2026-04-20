@@ -1,0 +1,38 @@
+{
+  "name": "codex-switch",
+  "version": "1.0.0",
+  "description": "One-click switch Codex Provider and automatically sync all sessions",
+  "type": "module",
+  "main": "codex-switch.js",
+  "bin": {
+    "codex-switch": "./codex-switch.js"
+  },
+  "scripts": {
+    "test": "node test.js",
+    "status": "node codex-switch.js status",
+    "switch": "node codex-switch.js",
+    "help": "node codex-switch.js help"
+  },
+  "keywords": [
+    "codex",
+    "provider",
+    "switch",
+    "sync",
+    "sessions",
+    "ai",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/codex-switch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/codex-switch/issues"
+  },
+  "homepage": "https://github.com/yourusername/codex-switch#readme"
+}
