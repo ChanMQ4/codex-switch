@@ -269,6 +269,67 @@ def switch_and_sync(target_provider: str, skip_config: bool = False, verbose: bo
 
     return True
 
+def sync_sessions_only(target_provider: str, verbose: bool = False):
+    """Sync all sessions to target provider without touching config"""
+    log('\n' + '=' * 60, Colors.BOLD)
+    log(f"Syncing Sessions to: {target_provider}", Colors.BOLD)
+    log('=' * 60, Colors.BOLD)
+
+    # Scan current state
+    log('\nScanning session files...', Colors.CYAN)
+    provider_counts = scan_session_providers()
+    total_sessions = sum(provider_counts.values())
+    log_info(f"Found {total_sessions} sessions")
+    for provider, count in provider_counts.items():
+        print(f"  - {provider}: {count} sessions")
+
+    # Sync all sessions
+    log('\nSyncing session files...', Colors.CYAN)
+    success_count = 0
+    skipped_count = 0
+    fail_count = 0
+
+    # Get all session files
+    pattern = os.path.join(SESSIONS_DIR, '**', '*.jsonl')
+    all_files = glob.glob(pattern, recursive=True)
+
+    for file_path in all_files:
+        result = update_session_provider(file_path, target_provider)
+        if result.get('success'):
+            if result.get('skipped'):
+                skipped_count += 1
+            else:
+                success_count += 1
+                if verbose:
+                    log_info(f"Updated: {os.path.basename(file_path)}")
+        else:
+            fail_count += 1
+            if verbose:
+                log_warning(f"Failed: {os.path.basename(file_path)}")
+
+    log_success(f"Success: {success_count}, Skipped: {skipped_count}, Failed: {fail_count}")
+
+    # Verify
+    log('\nVerifying sync results...', Colors.CYAN)
+    final_counts = scan_session_providers()
+    target_count = final_counts.get(target_provider, 0)
+
+    if target_count == total_sessions:
+        log_success(f"All {total_sessions} sessions synced to {target_provider}")
+    else:
+        log_warning(f"After sync: {target_provider} has {target_count} sessions (expected {total_sessions})")
+
+    log('\nFinal Distribution:', Colors.BOLD)
+    for provider, count in final_counts.items():
+        marker = '●' if provider == target_provider else '○'
+        print(f"  {marker} {provider}: {count} sessions")
+
+    log('\n' + '=' * 60, Colors.BOLD)
+    log_success('Sync completed!')
+    log('=' * 60 + '\n', Colors.BOLD)
+
+    return True
+
 def show_help():
     """Show help information"""
     print("""
@@ -279,11 +340,13 @@ Usage:
   codex-switch.py <provider>                Switch to specified provider
   codex-switch.py <provider> --no-config    Sync sessions only, don't modify config.toml
   codex-switch.py <provider> --verbose      Show detailed logs
+  codex-switch.py sync <provider>           Sync all sessions without touching config
 
 Examples:
   codex-switch.py status
   codex-switch.py yunyi
   codex-switch.py openai --verbose
+  codex-switch.py sync openai               # Sync sessions only
 """)
 
 def main():
@@ -298,6 +361,15 @@ def main():
 
     if command == 'status':
         show_status()
+        return
+
+    if command == 'sync':
+        if len(args) < 2:
+            log_error("Usage: codex-switch.py sync <provider>")
+            return
+        target_provider = args[1]
+        verbose = '--verbose' in args or '-v' in args
+        sync_sessions_only(target_provider, verbose)
         return
 
     target_provider = command
@@ -315,3 +387,4 @@ if __name__ == '__main__':
     except Exception as e:
         log_error(f"Execution failed: {e}")
         sys.exit(1)
+
