@@ -78,7 +78,7 @@ def scan_session_providers() -> Dict[str, int]:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     first_line = f.readline()
                     if '"model_provider"' in first_line:
-                        match = re.search(r'"model_provider":"([^"]+)"', first_line)
+                        match = re.search(r'"model_provider"\s*:\s*"([^"]+)"', first_line)
                         if match:
                             provider = match.group(1)
                             provider_counts[provider] = provider_counts.get(provider, 0) + 1
@@ -102,8 +102,10 @@ def find_sessions_by_provider(provider: str) -> List[str]:
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     first_line = f.readline()
-                    if f'"model_provider":"{provider}"' in first_line:
-                        files.append(file_path)
+                    if f'"model_provider"' in first_line:
+                        match = re.search(r'"model_provider"\s*:\s*"([^"]+)"', first_line)
+                        if match and match.group(1) == provider:
+                            files.append(file_path)
             except Exception:
                 continue
 
