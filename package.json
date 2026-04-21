@@ -1,7 +1,7 @@
 {
   "name": "codex-switch",
-  "version": "1.0.0",
-  "description": "One-click switch Codex Provider and automatically sync all sessions",
+  "version": "2.0.0",
+  "description": "One-click switch Codex Provider and automatically sync all sessions (Enhanced with codex-provider-sync)",
   "type": "module",
   "main": "codex-switch.js",
   "bin": {

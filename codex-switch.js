@@ -3,21 +3,16 @@
 /**
  * Codex Provider Switch Tool
  * A lightweight tool for switching Codex providers and syncing all sessions
+ * Enhanced with codex-provider-sync for complete synchronization
  *
  * @license MIT
  */
 
-import fs from 'node:fs';
-import path from 'node:path';
 import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import path from 'node:path';
 
 // Configuration
 const CODEX_HOME = process.env.CODEX_HOME || path.join(process.env.USERPROFILE || process.env.HOME, '.codex');
-const CONFIG_PATH = path.join(CODEX_HOME, 'config.toml');
-const SESSIONS_DIR = path.join(CODEX_HOME, 'sessions');
 
 // Terminal colors
 const colors = {
@@ -50,161 +45,74 @@ function logInfo(message) {
 }
 
 /**
- * Read current provider from config.toml
+ * Execute codex-provider command
  */
-function getCurrentProvider() {
+function execCodexProvider(command, options = {}) {
   try {
-    const configContent = fs.readFileSync(CONFIG_PATH, 'utf8');
-    const match = configContent.match(/model_provider\s*=\s*"([^"]+)"/);
-    return match ? match[1] : null;
+    const result = execSync(`codex-provider ${command}`, {
+      encoding: 'utf8',
+      stdio: options.silent ? 'pipe' : 'inherit',
+      env: { ...process.env, CODEX_HOME }
+    });
+    return { success: true, output: result };
   } catch (error) {
-    logError(`Failed to read config file: ${error.message}`);
-    return null;
+    return {
+      success: false,
+      output: error.stdout || error.stderr || error.message
+    };
   }
 }
 
 /**
- * Get all configured providers
+ * Parse status output
  */
-function getConfiguredProviders() {
-  try {
-    const configContent = fs.readFileSync(CONFIG_PATH, 'utf8');
-    const providers = [];
-    const regex = /\[model_providers\.([^\]]+)\]/g;
-    let match;
-    while ((match = regex.exec(configContent)) !== null) {
-      providers.push(match[1]);
-    }
-    return providers;
-  } catch (error) {
-    logError(`Failed to read config file: ${error.message}`);
-    return [];
-  }
-}
+function parseStatus(output) {
+  const lines = output.split('\n');
+  const status = {
+    codexHome: '',
+    currentProvider: '',
+    configuredProviders: [],
+    rolloutSessions: {},
+    sqliteSessions: {},
+  };
 
-/**
- * Scan all session files and count providers
- */
-function scanSessionProviders() {
-  const providerCounts = {};
+  let inRollout = false;
+  let inSQLite = false;
 
-  try {
-    const result = execSync(
-      `grep -r "\\"model_provider\\":" "${SESSIONS_DIR}" --include="*.jsonl" -h`,
-      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
-    );
-
-    const lines = result.split('\n').filter(line => line.trim());
-    for (const line of lines) {
-      try {
-        const match = line.match(/"model_provider"\s*:\s*"([^"]+)"/);
-        if (match) {
-          const provider = match[1];
-          providerCounts[provider] = (providerCounts[provider] || 0) + 1;
-        }
-      } catch (e) {
-        // Ignore parse errors
+  for (const line of lines) {
+    if (line.startsWith('Codex home:')) {
+      status.codexHome = line.split(':')[1].trim();
+    } else if (line.startsWith('Current provider:')) {
+      status.currentProvider = line.split(':')[1].trim();
+    } else if (line.startsWith('Configured providers:')) {
+      const providers = line.split(':')[1].trim();
+      status.configuredProviders = providers ? providers.split(',').map(p => p.trim()) : [];
+    } else if (line.includes('Rollout files:')) {
+      inRollout = true;
+      inSQLite = false;
+    } else if (line.includes('SQLite state:')) {
+      inRollout = false;
+      inSQLite = true;
+    } else if (line.includes('sessions:') && line.includes(':')) {
+      const match = line.match(/sessions:\s+(.+)/);
+      if (match) {
+        const providers = match[1].split(',').map(p => p.trim());
+        providers.forEach(p => {
+          const parts = p.split(':').map(s => s.trim());
+          if (parts.length === 2) {
+            const [name, count] = parts;
+            if (inRollout) {
+              status.rolloutSessions[name] = parseInt(count);
+            } else if (inSQLite) {
+              status.sqliteSessions[name] = parseInt(count);
+            }
+          }
+        });
       }
     }
-  } catch (error) {
-    logWarning('Error scanning session files, using fallback method');
   }
 
-  return providerCounts;
-}
-
-/**
- * Find all session files for a specific provider
- */
-function findSessionsByProvider(provider) {
-  const files = [];
-
-  try {
-    const result = execSync(
-      `grep -r "\\"model_provider\\"" "${SESSIONS_DIR}" --include="*.jsonl" -l`,
-      { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
-    );
-
-    const lines = result.split('\n').filter(line => line.trim());
-
-    // Filter files by provider
-    for (const filePath of lines) {
-      try {
-        const content = fs.readFileSync(filePath, 'utf8');
-        const firstLine = content.split('\n')[0];
-        const match = firstLine.match(/"model_provider"\s*:\s*"([^"]+)"/);
-        if (match && match[1] === provider) {
-          files.push(filePath);
-        }
-      } catch (e) {
-        // Ignore read errors
-      }
-    }
-  } catch (error) {
-    // grep returns non-zero exit code when no matches found
-    if (!error.message.includes('Command failed')) {
-      logWarning(`Error finding session files: ${error.message}`);
-    }
-  }
-
-  return files;
-}
-
-/**
- * Update provider in a session file
- */
-function updateSessionProvider(filePath, targetProvider) {
-  try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    const lines = content.split('\n');
-
-    if (lines.length === 0 || !lines[0].includes('"model_provider"')) {
-      return { success: false, reason: 'no_provider_field' };
-    }
-
-    const firstLine = JSON.parse(lines[0]);
-    const currentProvider = firstLine.payload?.model_provider;
-
-    if (currentProvider === targetProvider) {
-      return { success: true, skipped: true, currentProvider };
-    }
-
-    firstLine.payload.model_provider = targetProvider;
-    lines[0] = JSON.stringify(firstLine);
-
-    fs.writeFileSync(filePath, lines.join('\n'), 'utf8');
-
-    return { success: true, skipped: false, currentProvider };
-  } catch (error) {
-    return { success: false, reason: error.message };
-  }
-}
-
-/**
- * Switch provider in config.toml
- */
-function switchConfigProvider(targetProvider) {
-  try {
-    let configContent = fs.readFileSync(CONFIG_PATH, 'utf8');
-
-    // Check if provider exists
-    if (!configContent.includes(`[model_providers.${targetProvider}]`)) {
-      logError(`Provider "${targetProvider}" is not configured in config.toml`);
-      return false;
-    }
-
-    // Replace model_provider
-    configContent = configContent.replace(
-      /model_provider\s*=\s*"[^"]+"/,
-      `model_provider = "${targetProvider}"`
-    );
-
-    fs.writeFileSync(CONFIG_PATH, configContent, 'utf8');
-    return true;
-  } catch (error) {
-    logError(`Failed to modify config file: ${error.message}`);
-    return false;
-  }
+  return status;
 }
 
 /**
@@ -215,114 +123,126 @@ function showStatus() {
   log('Codex Provider Status', 'bold');
   log('='.repeat(60), 'bold');
 
-  const currentProvider = getCurrentProvider();
-  const configuredProviders = getConfiguredProviders();
-  const providerCounts = scanSessionProviders();
+  const result = execCodexProvider('status', { silent: true });
 
-  logInfo(`Codex Home: ${CODEX_HOME}`);
-  logInfo(`Current Provider: ${currentProvider || '(not set)'}`);
-  logInfo(`Configured Providers: ${configuredProviders.join(', ')}`);
+  if (!result.success) {
+    logError('Failed to get status. Make sure codex-provider is installed.');
+    logInfo('Install: npm install -g github:Dailin521/codex-provider-sync');
+    return;
+  }
 
-  log('\nSession Distribution:', 'bold');
-  for (const [provider, count] of Object.entries(providerCounts)) {
-    const marker = provider === currentProvider ? '●' : '○';
-    log(`  ${marker} ${provider}: ${count} sessions`);
+  const status = parseStatus(result.output);
+
+  logInfo(`Codex Home: ${status.codexHome}`);
+  logInfo(`Current Provider: ${status.currentProvider || '(not set)'}`);
+  logInfo(`Configured Providers: ${status.configuredProviders.join(', ') || '(none)'}`);
+
+  log('\n📊 Rollout Files:', 'bold');
+  if (Object.keys(status.rolloutSessions).length > 0) {
+    for (const [provider, count] of Object.entries(status.rolloutSessions)) {
+      const marker = provider === status.currentProvider ? '●' : '○';
+      log(`  ${marker} ${provider}: ${count} sessions`);
+    }
+  } else {
+    log('  (none)');
+  }
+
+  log('\n💿 SQLite Database:', 'bold');
+  if (Object.keys(status.sqliteSessions).length > 0) {
+    for (const [provider, count] of Object.entries(status.sqliteSessions)) {
+      const marker = provider === status.currentProvider ? '●' : '○';
+      log(`  ${marker} ${provider}: ${count} sessions`);
+    }
+  } else {
+    log('  (none)');
+  }
+
+  // Check for inconsistency
+  const allProviders = [...new Set([
+    ...Object.keys(status.rolloutSessions),
+    ...Object.keys(status.sqliteSessions)
+  ])];
+
+  let hasInconsistency = false;
+  for (const provider of allProviders) {
+    const rolloutCount = status.rolloutSessions[provider] || 0;
+    const sqliteCount = status.sqliteSessions[provider] || 0;
+    if (rolloutCount !== sqliteCount) {
+      hasInconsistency = true;
+      break;
+    }
+  }
+
+  if (hasInconsistency) {
+    log('\n⚠️  Inconsistency detected! Run sync to fix.', 'yellow');
+  } else {
+    log('\n✅ Rollout files and SQLite are in sync.', 'green');
   }
 
   log('');
 }
 
 /**
- * Switch and sync
+ * Switch provider
  */
-async function switchAndSync(targetProvider, options = {}) {
+function switchProvider(targetProvider, options = {}) {
   log('\n' + '='.repeat(60), 'bold');
   log(`Switching to Provider: ${targetProvider}`, 'bold');
-  log('='.repeat(60), 'bold');
-
-  const currentProvider = getCurrentProvider();
-  logInfo(`Current Provider: ${currentProvider}`);
-
-  // Step 1: Scan current state
-  log('\n[1/4] Scanning session files...', 'cyan');
-  const providerCounts = scanSessionProviders();
-  const totalSessions = Object.values(providerCounts).reduce((a, b) => a + b, 0);
-  logInfo(`Found ${totalSessions} sessions`);
-  for (const [provider, count] of Object.entries(providerCounts)) {
-    log(`  - ${provider}: ${count} sessions`);
-  }
-
-  // Step 2: Update config
-  if (!options.skipConfigUpdate) {
-    log('\n[2/4] Updating config.toml...', 'cyan');
-    if (switchConfigProvider(targetProvider)) {
-      logSuccess(`Switched to ${targetProvider}`);
-    } else {
-      return false;
-    }
-  } else {
-    log('\n[2/4] Skipping config update', 'yellow');
-  }
-
-  // Step 3: Sync session files
-  log('\n[3/4] Syncing session files...', 'cyan');
-  let successCount = 0;
-  let skippedCount = 0;
-  let failCount = 0;
-
-  for (const [provider, count] of Object.entries(providerCounts)) {
-    if (provider === targetProvider) {
-      skippedCount += count;
-      continue;
-    }
-
-    logInfo(`Processing ${count} sessions from ${provider}...`);
-    const files = findSessionsByProvider(provider);
-
-    for (const filePath of files) {
-      const result = updateSessionProvider(filePath, targetProvider);
-      if (result.success) {
-        if (result.skipped) {
-          skippedCount++;
-        } else {
-          successCount++;
-          if (options.verbose) {
-            log(`  ✓ ${path.basename(filePath)} (${result.currentProvider} → ${targetProvider})`);
-          }
-        }
-      } else {
-        failCount++;
-        if (options.verbose) {
-          log(`  ✗ ${path.basename(filePath)} (${result.reason})`);
-        }
-      }
-    }
-  }
-
-  logSuccess(`Success: ${successCount}, Skipped: ${skippedCount}, Failed: ${failCount}`);
-
-  // Step 4: Verify results
-  log('\n[4/4] Verifying sync results...', 'cyan');
-  const newProviderCounts = scanSessionProviders();
-  const newTotal = Object.values(newProviderCounts).reduce((a, b) => a + b, 0);
-
-  if (newProviderCounts[targetProvider] === totalSessions) {
-    logSuccess(`All ${totalSessions} sessions synced to ${targetProvider}`);
-  } else {
-    logWarning(`After sync: ${targetProvider} has ${newProviderCounts[targetProvider]} sessions (expected ${totalSessions})`);
-  }
-
-  log('\nFinal Distribution:', 'bold');
-  for (const [provider, count] of Object.entries(newProviderCounts)) {
-    const marker = provider === targetProvider ? '●' : '○';
-    log(`  ${marker} ${provider}: ${count} sessions`);
-  }
-
-  log('\n' + '='.repeat(60), 'bold');
-  logSuccess('Switch completed!');
   log('='.repeat(60) + '\n', 'bold');
 
-  return true;
+  logInfo('Using codex-provider-sync for reliable switching...');
+
+  const result = execCodexProvider(`switch ${targetProvider}`);
+
+  if (result.success) {
+    log('\n' + '='.repeat(60), 'bold');
+    logSuccess('Switch completed successfully!');
+    log('='.repeat(60) + '\n', 'bold');
+    return true;
+  } else {
+    log('\n' + '='.repeat(60), 'bold');
+    logError('Switch failed!');
+    log('='.repeat(60) + '\n', 'bold');
+
+    if (result.output.includes('is currently in use')) {
+      logWarning('SQLite database is locked. Please:');
+      log('  1. Close all Codex CLI sessions');
+      log('  2. Close Codex App');
+      log('  3. Stop app-server');
+      log('  4. Try again');
+    }
+
+    return false;
+  }
+}
+
+/**
+ * Sync only (don't modify config.toml)
+ */
+function syncOnly(targetProvider = null) {
+  log('\n' + '='.repeat(60), 'bold');
+  log('Syncing Sessions', 'bold');
+  log('='.repeat(60) + '\n', 'bold');
+
+  const command = targetProvider
+    ? `sync --provider ${targetProvider}`
+    : 'sync';
+
+  logInfo('Using codex-provider-sync for reliable syncing...');
+
+  const result = execCodexProvider(command);
+
+  if (result.success) {
+    log('\n' + '='.repeat(60), 'bold');
+    logSuccess('Sync completed successfully!');
+    log('='.repeat(60) + '\n', 'bold');
+    return true;
+  } else {
+    log('\n' + '='.repeat(60), 'bold');
+    logError('Sync failed!');
+    log('='.repeat(60) + '\n', 'bold');
+    return false;
+  }
 }
 
 /**
@@ -336,18 +256,36 @@ async function main() {
     console.log(`
 Codex Provider Switch Tool - Switch provider and sync all sessions
 
+This tool wraps codex-provider-sync to provide reliable switching.
+It handles both rollout files (.jsonl) and SQLite database synchronization.
+
 Usage:
   codex-switch status                    Show current status
   codex-switch <provider>                Switch to specified provider
-  codex-switch <provider> --no-config    Sync sessions only, don't modify config.toml
-  codex-switch <provider> --verbose      Show detailed logs
+  codex-switch sync                      Sync sessions to current provider
+  codex-switch sync <provider>           Sync sessions to specified provider
 
 Examples:
   codex-switch status
   codex-switch yunyi
-  codex-switch openai --verbose
+  codex-switch openai
+  codex-switch sync
+  codex-switch sync apigather
+
+Requirements:
+  - codex-provider-sync must be installed globally
+  - Install: npm install -g github:Dailin521/codex-provider-sync
 `);
     return;
+  }
+
+  // Check if codex-provider is installed
+  try {
+    execSync('codex-provider --version', { stdio: 'ignore' });
+  } catch (error) {
+    logError('codex-provider is not installed!');
+    logInfo('Install it with: npm install -g github:Dailin521/codex-provider-sync');
+    process.exit(1);
   }
 
   if (command === 'status') {
@@ -355,13 +293,19 @@ Examples:
     return;
   }
 
+  if (command === 'sync') {
+    const targetProvider = args[1];
+    syncOnly(targetProvider);
+    return;
+  }
+
+  // Default is to switch provider
   const targetProvider = command;
   const options = {
-    skipConfigUpdate: args.includes('--no-config'),
     verbose: args.includes('--verbose') || args.includes('-v')
   };
 
-  await switchAndSync(targetProvider, options);
+  switchProvider(targetProvider, options);
 }
 
 main().catch(error => {
