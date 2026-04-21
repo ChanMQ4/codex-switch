@@ -127,7 +127,7 @@ python codex-switch.py <provider-name> --no-config
 
 ## 🔧 工作原理
 
-### 完整同步机制
+### JavaScript 版本（完整同步）
 
 JavaScript 版本整合了 [codex-provider-sync](https://github.com/Dailin521/codex-provider-sync)，提供完整的同步能力：
 
@@ -144,9 +144,9 @@ JavaScript 版本整合了 [codex-provider-sync](https://github.com/Dailin521/co
    - 默认保留最近 5 份备份
    - 支持回滚恢复
 
-### Python 版本
+### Python 版本（轻量级）
 
-Python 版本直接修改文件内容，适合快速操作：
+Python 版本直接修改文件内容，适合快速操作和无 Node.js 环境：
 
 ```python
 # 修改会话文件的第一行
@@ -155,7 +155,18 @@ first_line['payload']['model_provider'] = target_provider
 lines[0] = json.dumps(first_line)
 ```
 
-**注意**：Python 版本只处理 Rollout 文件，不处理 SQLite 数据库。如需完整同步，请使用 JavaScript 版本。
+**特点**：
+- ✅ 无需任何依赖（仅使用 Python 标准库）
+- ✅ 快速启动，适合脚本化
+- ✅ 跨平台兼容
+- ⚠️ 只处理 Rollout 文件，不处理 SQLite 数据库
+- ⚠️ 无自动备份功能
+
+**适用场景**：
+- 没有 Node.js 环境
+- 需要快速脚本化操作
+- 只需要基本的 provider 切换功能
+- 可以接受手动处理 SQLite 数据库
 
 ## 📊 性能
 
@@ -202,8 +213,41 @@ node test.js
 
 ## 💡 版本选择
 
-- **JavaScript 版本**：完整同步（Rollout + SQLite），自动备份，推荐使用
-- **Python 版本**：快速操作，仅处理 Rollout 文件，适合简单场景
+### 推荐使用 JavaScript 版本
+
+如果你有 Node.js 环境，**强烈推荐使用 JavaScript 版本**：
+
+- ✅ **完整同步**：同时处理 Rollout 文件和 SQLite 数据库
+- ✅ **自动备份**：每次操作前自动备份，支持回滚
+- ✅ **更可靠**：基于成熟的 codex-provider-sync 工具
+- ✅ **数据一致性**：确保所有会话在切换后都可见
+
+### Python 版本适用场景
+
+在以下情况下使用 Python 版本：
+
+- ❌ 没有 Node.js 环境
+- ✅ 需要快速脚本化操作
+- ✅ 只需要基本的 provider 切换
+- ⚠️ 可以接受只同步 Rollout 文件（可能需要手动处理 SQLite）
+
+### 对比表格
+
+| 特性 | JavaScript 版本 | Python 版本 |
+|------|----------------|-------------|
+| Rollout 文件同步 | ✅ | ✅ |
+| SQLite 数据库同步 | ✅ | ❌ |
+| 自动备份 | ✅ | ❌ |
+| 回滚支持 | ✅ | ❌ |
+| 依赖 | Node.js + codex-provider-sync | 仅 Python 3.6+ |
+| 可靠性 | 高 | 中等 |
+| 启动速度 | 中等 | 快 |
+
+### 为什么 Python 版本不更新？
+
+1. **保持轻量级**：Python 版本的核心价值是无依赖、快速启动
+2. **codex-provider-sync 是 Node.js 工具**：无法在纯 Python 环境中使用
+3. **不同的使用场景**：两个版本服务于不同的用户需求
 
 ## 🤝 贡献
 
