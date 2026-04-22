@@ -182,6 +182,15 @@ node test.js
 - Standard `~/.codex` directory structure
 - Windows / Linux / macOS
 
+## 🙏 Acknowledgments
+
+Special thanks to the [LINUX DO Community](https://linux.do) for their support and assistance! This project wouldn't be possible without the valuable suggestions and feedback from community members.
+
+Special recognition to:
+- The technical exchange platform provided by the community
+- Active discussions and suggestions from developers
+- Continuous support for open source projects
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
